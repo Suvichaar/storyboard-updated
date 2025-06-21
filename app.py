@@ -386,6 +386,19 @@ if submit_button:
             "lang": language
         }
 
+        s3_key = f"{slug_nano}.html"
+
+        s3_client.put_object(
+            Bucket="suvichaarstories",
+            Key=s3_key,
+            Body=html_template.encode("utf-8"),
+            ContentType="text/html",
+        )
+
+        final_story_url = f"https://suvichaar.org/stories/{slug_nano}"  # This is your canurl
+        st.success("✅ HTML uploaded successfully to S3!")
+        st.markdown(f"🔗 **Live Story URL:** [Click to view your story]({final_story_url})")
+        
         json_str = json.dumps(metadata_dict, indent=4)
 
         # Save data to session_state
