@@ -82,26 +82,39 @@ story_title = st.text_input("Story Title")
 # Auto-generate metadata if story_title changed
 
 if story_title.strip() and story_title != st.session_state.last_title:
-    with st.spinner("Generating meta description and keywords..."):
+    with st.spinner("Generating meta description, keywords, and filter tags..."):
         messages = [
             {
                 "role": "user",
-                "content": f"Generate a short SEO-friendly meta description and meta keywords for the story titled: '{story_title}'"}]
+                "content": f"""
+                Generate the following for a web story titled '{story_title}':
+                1. A short SEO-friendly meta description
+                2. Meta keywords (comma separated)
+                3. Relevant filter tags (comma separated, suitable for categorization and content filtering)"""
+            }
+        ]
         try:
             response = client.chat.completions.create(
                 model="gpt-4",
                 messages=messages,
-                max_tokens=150,
+                max_tokens=300,
                 temperature=0.5,
             )
             output = response.choices[0].message.content
+
+            # Extract metadata using regex
             desc = re.search(r"[Dd]escription\s*[:\-]\s*(.+)", output)
             keys = re.search(r"[Kk]eywords\s*[:\-]\s*(.+)", output)
+            tags = re.search(r"[Ff]ilter\s*[Tt]ags\s*[:\-]\s*(.+)", output)
+
             st.session_state.meta_description = desc.group(1).strip() if desc else ""
             st.session_state.meta_keywords = keys.group(1).strip() if keys else ""
+            st.session_state.generated_filter_tags = tags.group(1).strip() if tags else ""
+
         except Exception as e:
             st.warning(f"Error: {e}")
         st.session_state.last_title = story_title
+
 
 with st.form("content_form"):
     meta_description = st.text_area("Meta Description", value=st.session_state.meta_description)
@@ -112,7 +125,6 @@ with st.form("content_form"):
     html_file = st.file_uploader("Upload your Raw HTML File", type=["html", "htm"])
     categories = st.selectbox("Select your Categories", ["Art", "Travel", "Entertainment", "Literature", "Books", "Sports", "History", "Culture", "Wildlife", "Spiritual", "Food"])
     # Input field
-
     default_tags = [
         "Lata Mangeshkar",
         "Indian Music Legends",
@@ -131,9 +143,10 @@ with st.form("content_form"):
 
     tag_input = st.text_input(
         "Enter Filter Tags (comma separated):",
-        value=", ".join(default_tags),
+        value=st.session_state.get("generated_filter_tags", ", ".join(default_tags)),
         help="Example: Music, Culture, Lata Mangeshkar"
     )
+
 
     use_custom_cover = st.radio("Do you want to add a custom cover image URL?", ("No", "Yes"))
     if use_custom_cover == "Yes":
@@ -144,12 +157,38 @@ with st.form("content_form"):
     submit_button = st.form_submit_button("Submit")
 
 if submit_button:
-    st.markdown("### Submitted Data")
-    st.write(f"**Story Title:** {story_title}")
-    st.write(f"**Meta Description:** {meta_description}")
-    st.write(f"**Meta Keywords:** {meta_keywords}")
-    st.write(f"**Content Type:** {content_type}")
-    st.write(f"**Language:** {language}")
+    # Validation before processing
+    missing_fields = []
+
+    if not story_title.strip():
+        missing_fields.append("Story Title")
+    if not meta_description.strip():
+        missing_fields.append("Meta Description")
+    if not meta_keywords.strip():
+        missing_fields.append("Meta Keywords")
+    if not content_type.strip():
+        missing_fields.append("Content Type")
+    if not language.strip():
+        missing_fields.append("Language")
+    if not image_url.strip():
+        missing_fields.append("Image URL")
+    if not tag_input.strip():
+        missing_fields.append("Filter Tags")
+    if not categories.strip():
+        missing_fields.append("Category")
+    if not html_file:
+        missing_fields.append("Raw HTML File")
+
+    if missing_fields:
+        st.error(f"❌ Please fill all required fields before submitting:\n- " + "\n- ".join(missing_fields))
+    else:
+        # ✅ All fields are valid, proceed with your full processing logic
+        st.markdown("### Submitted Data")
+        st.write(f"**Story Title:** {story_title}")
+        st.write(f"**Meta Description:** {meta_description}")
+        st.write(f"**Meta Keywords:** {meta_keywords}")
+        st.write(f"**Content Type:** {content_type}")
+        st.write(f"**Language:** {language}")
 
     key_path = "media/default.png"
     uploaded_url = ""
@@ -241,14 +280,11 @@ if submit_button:
         html_template = html_template.replace("{{canurl1}}", canurl1)
 
         if image_url.startswith("http://media.suvichaar.org") or image_url.startswith("https://media.suvichaar.org"):
-    
+        
             html_template = html_template.replace("{{image0}}", image_url)
 
-        elif image_url.startswith("https://res.cloudinary.com"):
-            # Replace Cloudinary base with our CDN
-            parsed_cloudinary_url = urlparse(image_url)
-            cloudinary_key = parsed_cloudinary_url.path.lstrip("/")
-            key_path = f"media/{os.path.basename(cloudinary_key)}"
+            parsed_cdn_url = urlparse(image_url)
+            cdn_key_path = parsed_cdn_url.path.lstrip("/")  # ✅ Fix
 
             resize_presets = {
                 "potraitcoverurl": (640, 853),
@@ -258,7 +294,7 @@ if submit_button:
             for label, (width, height) in resize_presets.items():
                 template = {
                     "bucket": bucket_name,
-                    "key": key_path,
+                    "key": cdn_key_path,
                     "edits": {
                         "resize": {
                             "width": width,
@@ -269,9 +305,13 @@ if submit_button:
                 }
                 encoded = base64.urlsafe_b64encode(json.dumps(template).encode()).decode()
                 final_url = f"{cdn_prefix_media}{encoded}"
-                html_template = html_template.replace(f"{{{{{label}}}}}", final_url)
+                # st.write(f"✅ Replacing {{{label}}} with {final_url}")
+                html_template = html_template.replace(f"{{{label}}}", final_url)
 
-            html_template = html_template.replace("{{image0}}", f"{cdn_prefix_media}{key_path}")
+        # Cleanup step to remove incorrect {url} wrapping
+        html_template = re.sub(r'href="\{(https://[^}]+)\}"', r'href="\1"', html_template)
+        html_template = re.sub(r'src="\{(https://[^}]+)\}"', r'src="\1"', html_template)
+
         # ----------- Extract <style amp-custom> block from uploaded raw HTML -------------
         extracted_style = ""
         if html_file:
@@ -326,8 +366,8 @@ if submit_button:
             else:
                 st.warning("Could not find insertion points in the HTML template.")
 
-        st.markdown("### Final Modified HTML")
-        st.code(html_template, language="html")
+        #st.markdown("### Final Modified HTML")
+        # st.code(html_template, language="html")
 
         # ----------- Generate and Provide Metadata JSON -------------
         metadata_dict = {
@@ -360,10 +400,9 @@ if submit_button:
         st.download_button(
             label="📦 Download HTML + Metadata ZIP",
             data=zip_buffer,
-            file_name=f"{slug_nano}_story_bundle.zip",
+            file_name=f"{story_title}.zip",
             mime="application/zip"
         )
 
     except Exception as e:
         st.error(f"Error processing HTML: {e}")
-
