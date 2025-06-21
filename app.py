@@ -326,10 +326,10 @@ if submit_button:
 
             # Extract <amp-story> block
             start = raw_html.find("<amp-story-page")
-            end = raw_html.find("</amp-story>")
+            end = raw_html.rfind("</amp-story-page>")
             extracted_amp_story = ""
             if start != -1 and end != -1:
-                extracted_amp_story = raw_html[start:end + len("</amp-story>")]
+                extracted_amp_story = raw_html[start:end + len("</amp-story-page>")]
             else:
                 st.warning("No complete <amp-story> block found in uploaded HTML.")
         else:
